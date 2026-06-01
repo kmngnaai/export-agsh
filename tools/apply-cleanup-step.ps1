@@ -78,10 +78,31 @@ function Count-LiteralOccurrences {
     }
 }
 
+function New-LiteralBlocksWithFlexibleNewlines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines
+    )
+
+    $Blocks = @($Lines[0])
+
+    for ($Index = 1; $Index -lt $Lines.Count; $Index++) {
+        $NextBlocks = @()
+        foreach ($Block in $Blocks) {
+            $NextBlocks += $Block + "`n" + $Lines[$Index]
+            $NextBlocks += $Block + "`r`n" + $Lines[$Index]
+        }
+        $Blocks = $NextBlocks
+    }
+
+    return $Blocks
+}
+
 # Chỉ cho phép các cleanup nhỏ đã được phân tích trước.
 $AllowedSteps = @(
     "remove-v72-self-assignment-u88",
-    "remove-v72-self-assignment-u90"
+    "remove-v72-self-assignment-u90",
+    "remove-u86-wrapper"
 )
 
 if ($AllowedSteps -notcontains $Step) {
@@ -118,13 +139,25 @@ switch ($Step) {
         )
         $Replacement = "# Force late references"
     }
+    "remove-u86-wrapper" {
+        $TargetLines = @(
+            "# =========================",
+            "# U86 FIXED ENTRY MARKER",
+            "# =========================",
+            "_u86_processor_run_base = _u85_processor_run",
+            "",
+            "# Legacy wrapper candidate: adds BENCH_ENTER_U86 marker and delegates to U85.",
+            "# Keep until regression-tested and indirect callers are ruled out.",
+            "def _u86_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):",
+            "    self.logger.log('BENCH_ENTER_U86', 'info')",
+            "    return _u86_processor_run_base(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)"
+        )
+        $Replacement = ""
+    }
 }
 
-# Thử riêng literal LF và CRLF để xử lý an toàn cả file có newline trộn lẫn.
-$TargetBlocks = @(
-    [string]::Join("`n", $TargetLines),
-    [string]::Join("`r`n", $TargetLines)
-)
+# Thử các tổ hợp literal LF và CRLF theo từng dòng để xử lý an toàn file có newline trộn lẫn.
+$TargetBlocks = New-LiteralBlocksWithFlexibleNewlines -Lines $TargetLines
 $TargetBlock = $null
 $MatchCount = 0
 
