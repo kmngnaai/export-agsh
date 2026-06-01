@@ -23,6 +23,7 @@ Làm cho backend dễ đọc và dễ bảo trì hơn bằng các thay đổi nh
 8. Xóa unused local alias `_u84_processor_run_base`.
 9. Xóa self-assignment V72 U88 sau comment `# Force late references to use cache-enabled builder`.
 10. Xóa self-assignment V72 U90 sau comment `# Force late references`.
+11. Xóa unused wrapper `_u86_processor_run`.
 
 ## 4. Thay đổi đã xóa thật
 
@@ -78,17 +79,49 @@ Vị trí: ngay sau comment `# Force late references`.
 
 Kết quả regression runner: PASS.
 
+### Unused wrapper U86
+
+Đã xóa block U86-only gồm:
+
+```python
+_u86_processor_run_base = _u85_processor_run
+
+def _u86_processor_run(...):
+    self.logger.log('BENCH_ENTER_U86', 'info')
+    return _u86_processor_run_base(...)
+```
+
+Lý do xóa:
+
+- `_u86_processor_run` không còn caller nội bộ.
+- `_u86_processor_run` không được gán vào `Processor.run`.
+- Không có wrapper phía sau capture `_u86_processor_run`.
+- Alias `_u86_processor_run_base` chỉ phục vụ wrapper U86 đã xóa.
+
+Rủi ro còn lại:
+
+- Chỉ còn rủi ro nếu có caller bên ngoài repo import trực tiếp `_u86_processor_run`.
+
+Test sau khi xóa:
+
+```powershell
+tools\apply-cleanup-step.ps1 -Step remove-u86-wrapper
+```
+
+Kết quả: script đã chạy regression runner PASS.
+
 ## 5. Các vùng chưa được xóa
 
 Các vùng sau mới chỉ được đánh dấu candidate, chưa được xóa:
 
-- Wrapper `_u86_processor_run`.
 - Wrapper `_u95_processor_run`.
 - Wrapper `_u96_processor_run`.
 
 ## 6. Lưu ý
 
 - Chưa xóa wrapper liên quan monkey-patch.
+- Chưa xóa `_u85_processor_run`.
+- Chưa xóa `_u95_processor_run` hoặc `_u96_processor_run` vì nằm gần monkey-patch có logic thật.
 - Chưa thay đổi `CORE_RUN_V6`.
 - Chưa thay đổi `Processor.run()` cuối.
 - Chưa đụng vào cache, substate hoặc detail index.
