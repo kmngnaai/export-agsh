@@ -12,6 +12,7 @@ Set-Location $RepoRoot
 
 $BackendPath = "00.Detaisublog_v26.py"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$BlankLineMarker = "__CLEANUP_BLANK_LINE__"
 
 function Fail {
     param(
@@ -84,13 +85,25 @@ function New-LiteralBlocksWithFlexibleNewlines {
         [string[]]$Lines
     )
 
+    if ($Lines.Count -eq 0 -or [string]::IsNullOrEmpty($Lines[0])) {
+        throw "Danh sách dòng literal không hợp lệ."
+    }
+
     $Blocks = @($Lines[0])
 
     for ($Index = 1; $Index -lt $Lines.Count; $Index++) {
+        $NextLine = $Lines[$Index]
+        if ($NextLine -eq $BlankLineMarker) {
+            $NextLine = ""
+        }
+        elseif ([string]::IsNullOrEmpty($NextLine)) {
+            throw "Danh sách dòng literal chứa chuỗi rỗng không hợp lệ."
+        }
+
         $NextBlocks = @()
         foreach ($Block in $Blocks) {
-            $NextBlocks += $Block + "`n" + $Lines[$Index]
-            $NextBlocks += $Block + "`r`n" + $Lines[$Index]
+            $NextBlocks += $Block + "`n" + $NextLine
+            $NextBlocks += $Block + "`r`n" + $NextLine
         }
         $Blocks = $NextBlocks
     }
@@ -145,7 +158,7 @@ switch ($Step) {
             "# U86 FIXED ENTRY MARKER",
             "# =========================",
             "_u86_processor_run_base = _u85_processor_run",
-            "",
+            $BlankLineMarker,
             "# Legacy wrapper candidate: adds BENCH_ENTER_U86 marker and delegates to U85.",
             "# Keep until regression-tested and indirect callers are ruled out.",
             "def _u86_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):",
