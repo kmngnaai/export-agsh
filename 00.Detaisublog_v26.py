@@ -7739,9 +7739,6 @@ def _v72_build_detail_bundle(file_path: str):
     return bundle
 
 # Force late references
-# Legacy self-assignment candidate: this assignment is a no-op.
-# Keep the cache-enabled function definition above until regression-tested.
-_v72_build_detail_bundle = _v72_build_detail_bundle
 
 
 def _u90_core_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None) -> Dict[str, int]:
