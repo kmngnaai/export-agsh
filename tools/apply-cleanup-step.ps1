@@ -103,25 +103,29 @@ if ($Text.Contains("`r`n")) {
     $NewLine = "`r`n"
 }
 
-$CandidateBlock = [string]::Join($NewLine, @(
-    "# Legacy self-assignment candidate: this assignment is a no-op.",
-    "# Keep the cache-enabled function definition above until regression-tested.",
-    "_v72_build_detail_bundle = _v72_build_detail_bundle"
-))
-
 switch ($Step) {
     "remove-v72-self-assignment-u88" {
-        $Anchor = "# Force late references to use cache-enabled builder"
+        $TargetBlock = [string]::Join($NewLine, @(
+            "# Force late references to use cache-enabled builder",
+            "# Legacy self-assignment candidate: this assignment is a no-op.",
+            "# Keep the cache-enabled function definition above until regression-tested.",
+            "_v72_build_detail_bundle = _v72_build_detail_bundle"
+        ))
+        $Replacement = "# Force late references to use cache-enabled builder"
     }
     "remove-v72-self-assignment-u90" {
-        $Anchor = "# Force late references"
+        $TargetBlock = [string]::Join($NewLine, @(
+            "# Force late references",
+            "# Legacy self-assignment candidate: this assignment is a no-op.",
+            "# Keep the cache-enabled function definition above until regression-tested.",
+            "_v72_build_detail_bundle = _v72_build_detail_bundle"
+        ))
+        $Replacement = "# Force late references"
     }
 }
 
 # Dùng anchor cụ thể để chỉ xóa block mục tiêu, không chạm function hoặc override U108.
-$Target = $Anchor + $NewLine + $CandidateBlock
-$Replacement = $Anchor
-$MatchCount = Count-LiteralOccurrences -Text $Text -Needle $Target
+$MatchCount = Count-LiteralOccurrences -Text $Text -Needle $TargetBlock
 
 if ($MatchCount -eq 0) {
     Fail "Không tìm thấy block cleanup chính xác cho Step '$Step'."
@@ -130,7 +134,7 @@ if ($MatchCount -gt 1) {
     Fail "Tìm thấy $MatchCount block cho Step '$Step', nhiều hơn số kỳ vọng là 1."
 }
 
-$UpdatedText = $Text.Replace($Target, $Replacement)
+$UpdatedText = $Text.Replace($TargetBlock, $Replacement)
 [System.IO.File]::WriteAllText($BackendPath, $UpdatedText, $Utf8NoBom)
 
 Write-Host "APPLIED: $Step"
