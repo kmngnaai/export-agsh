@@ -1,3 +1,8 @@
+# =========================================================
+# REGION: Imports and constants
+# Dependencies, application settings, output schemas and shared styles.
+# =========================================================
+
 import logging
 
 import os
@@ -591,6 +596,11 @@ def compare_with_folder_truth(folder_name: str, invoice_no: Any, invoice_date: A
     return msg
 
 
+# =========================================================
+# REGION: Excel readers and sheet detection
+# Detect workbook formats, load source sheets and locate PL / INV content.
+# =========================================================
+
 def detect_file_type(file_path: str) -> Tuple[str, Optional[str]]:
     ext = os.path.splitext(file_path)[1].lower()
     with open(file_path, "rb") as f:
@@ -896,6 +906,11 @@ def get_meta_value_flexible(sheet_data: List[List[Any]], r: int, c: int, key_nam
             return nz_str(candidate)
     return ""
 
+
+# =========================================================
+# REGION: Metadata extraction
+# Read invoice metadata and compare values collected from source sheets.
+# =========================================================
 
 def extract_sheet_meta(sheet_data: List[List[Any]]) -> Dict[str, str]:
     meta = {k: "" for k in META_KEYS}
@@ -1294,6 +1309,11 @@ def build_processed_sets_from_rows(rows: List[List[Any]]) -> Tuple[set, set]:
     return dict_path, dict_sig
 
 
+# =========================================================
+# REGION: Output workbook helpers
+# Save output workbooks defensively, preserving a backup when possible.
+# =========================================================
+
 def safe_save_workbook_atomic(wb, output_path: str):
     output_path = os.path.abspath(output_path)
     folder = os.path.dirname(output_path) or "."
@@ -1349,6 +1369,11 @@ def autofit_useful(ws, max_col: int):
     ws.row_dimensions[1].height = 20
 
 
+
+# =========================================================
+# REGION: Source repair helpers
+# Optional write-back helpers. These functions may modify source workbooks.
+# =========================================================
 
 def get_repair_truth(folder_name: str, options: RepairOptions) -> Dict[str, str]:
     truth = {"invoice_no": "", "invoice_date": "", "destination": ""}
@@ -1468,6 +1493,11 @@ def make_log_row(file_path: str, step_name: str, result_text: str, detail_text: 
         file_path,
     ]
 
+
+# =========================================================
+# REGION: Output workbook helpers (open or create)
+# Open an existing output workbook or create a new workbook for aggregation.
+# =========================================================
 
 def open_or_create_output_workbook(full_path: str):
     if not nz_str(full_path):
@@ -1661,6 +1691,11 @@ def open_folder_and_select_file(path: str):
             subprocess.Popen(["open", folder])
         else:
             subprocess.Popen(["xdg-open", folder])
+
+# =========================================================
+# REGION: Legacy Tkinter UI
+# Kept for the direct backend entrypoint. The PySide6 dashboard is separate.
+# =========================================================
 
 class MainWindow:
     def __init__(self):
@@ -2094,6 +2129,12 @@ def main():
 
 
 
+
+# =========================================================
+# REGION: Processor override chain
+# Historical patches below extend or replace earlier runtime behavior.
+# Preserve ordering: later definitions and assignments may be authoritative.
+# =========================================================
 
 # ==============================
 # V4.2 OVERRIDES - DETAIL REPORT LIKE SAMPLE
@@ -7520,6 +7561,11 @@ def _u88_processor_run(self, folder_path: str, output_path: str, progress_callba
 #   *.sourcecache_u90.pkl
 # =========================================================
 
+# =========================================================
+# REGION: Cache / state / sidecar helpers
+# Sidecar caches reduce repeat parsing and support incremental processing.
+# =========================================================
+
 _U90_SOURCE_CACHE_VERSION = 1
 _U90_SOURCE_CACHE_CTX = {
     'output_path': '',
@@ -10297,6 +10343,11 @@ if not _logger_runtime.handlers:
     _logger_runtime.addHandler(_h)
 
 
+# =========================================================
+# REGION: Cache / state / sidecar helpers (current runtime)
+# Parse cache, detail index, substate, issue snapshot and benchmark log.
+# =========================================================
+
 _U130_PARSE_CACHE_VERSION = 1
 
 
@@ -10871,6 +10922,11 @@ def _u132_safe_parse_payload(file_path: str) -> Tuple[List[Any], Any, str]:
     except Exception as exc:
         return _u132_make_error_arr(file_path, str(exc)), ([], [], [], []), nz_str(exc)
 
+
+# =========================================================
+# REGION: Processor override chain (runtime consolidation)
+# Consolidated runtime layer extended by later Processor subclasses below.
+# =========================================================
 
 class Processor(Processor):
     """
@@ -14465,6 +14521,13 @@ def _v24_fmt_map(d: Dict[str, Any], keys: Optional[List[str]] = None) -> str:
         return ' | '.join(f"{k}={nz_str((d or {}).get(k, ''))}" for k in keys)
     except Exception:
         return nz_str(d)
+
+
+# =========================================================
+# REGION: Final Processor runtime
+# Active Processor.run layer. It relies on helpers and inherited methods above.
+# =========================================================
+
 class Processor(Processor):
 
     def run(self, folder_path: str, output_path: str, progress_callback=None, repair_options=None):
@@ -14689,6 +14752,10 @@ class Processor(Processor):
         folder_audit_cache_save_allowed = True
         core_needs_workbook = bool(pre_subdetail_payloads or deleted_paths)
         open_decision: Dict[str, Any] = {}
+        # =====================================================
+        # REGION: folder_audit_ext integration
+        # Build folder deltas before opening the output workbook when possible.
+        # =====================================================
         try:
             from folder_audit_ext import build_delta_state, apply_delta_inplace as _fad_apply_delta_inplace, save_cache as _fad_save_cache
             save_folder_audit_cache_func = _fad_save_cache
