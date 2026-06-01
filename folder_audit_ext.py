@@ -722,7 +722,7 @@ def _parse_amount(v: Any) -> float:
 
 def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
     """
-    Compute Vas, HC and Cus no.-STT columns on the INV sheet.
+    Compute Vas and HC columns on the INV sheet.
 
     COLUMN PLACEMENT
     ────────────────
@@ -731,7 +731,7 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
 
     GROUP KEY (per row)
     ───────────────────
-    DETAIL rows  : Invoice No + Date + Cus no.1   (all 3 cols present)
+    DETAIL rows  : Invoice No + Date + Cus no.-   (all 3 cols present)
     All others   : inherit from most-recent DETAIL of same Invoice No
 
     PER-ROW VAS / HC
@@ -744,12 +744,6 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
     DEDUCT          Vas = that row's TOTAL AMOUNT,  HC = blank
     HANDLING CHARGE Vas = blank,  HC = blank  (value lifted to its DETAIL)
     TOTAL           Vas = group Vas total,  HC = group HC total
-
-    CUS NO.-STT
-    ───────────
-    Take suffix "-N" from S. Invoice# and append to Cus no.-
-    e.g. S.Invoice# = INV000000479890-3  →  Cus no.-STT = <Cus no.->-3
-    Blank if S. Invoice# absent or has no "-N" suffix.
 
     VALIDATION (Status of TOTAL row)
     ─────────────────────────────────
@@ -768,7 +762,6 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
     status_col       = hdr.get("Status", 0)
     s_inv_col        = hdr.get("S. Invoice#", 0)
     date_col         = hdr.get("Date", 0)
-    cus_no1_col      = hdr.get(CUS_NO_FIRST_HEADER, 0)
     cus_slot_col     = hdr.get(CUS_NO_SLOT_HEADER, 0)
 
     if min(row_type_col, inv_col) <= 0:
@@ -801,7 +794,6 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
     status_col       = hdr.get("Status",             status_col)
     s_inv_col        = hdr.get("S. Invoice#",        s_inv_col)
     date_col         = hdr.get("Date",               date_col)
-    cus_no1_col      = hdr.get(CUS_NO_FIRST_HEADER,  cus_no1_col)
     cus_slot_col     = hdr.get(CUS_NO_SLOT_HEADER,   cus_slot_col)
     vas_col          = hdr.get(VAS_HEADER,            0)
     hc_col           = hdr.get(HC_HEADER,             0)
@@ -821,12 +813,12 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
 
     # ── Pass 2: pre-normalize effective_cus then build group keys ────────────
     #
-    # DETAIL row  : set current_cus = Cus no.1 of this row; gkey uses it
+    # DETAIL row  : set current_cus = Cus no.- of this row; gkey uses it
     # HANDLING / UPCHARGE / DEDUCT: inherit current_cus (same block)
     # TOTAL row   : inherit current_cus THEN reset → closes this block
     #
     # This prevents Vas/HC totals bleeding across blocks of the same invoice.
-    current_cus_for_inv: Dict[str, str] = {}   # inv_no -> active gkey
+    current_cus_for_inv: Dict[str, Tuple[str, str, str]] = {}   # inv_no -> active gkey
 
     for ri in row_info:
         inv_no = ri["inv"]
@@ -835,23 +827,30 @@ def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
         r  = ri["r"]
         rt = ri["rt"]
 
+        date_val = _nz(ws.cell(r, date_col).value) if date_col > 0 else ""
+        cus_slot = _nz(ws.cell(r, cus_slot_col).value) if cus_slot_col > 0 else ""
+
         if rt == "DETAIL":
-            date_val   = _nz(ws.cell(r, date_col).value)    if date_col    > 0 else ""
-            cusno1_val = _nz(ws.cell(r, cus_no1_col).value) if cus_no1_col > 0 else ""
-            gkey = f"{inv_no}||{date_val}|||{cusno1_val}"
+            gkey = (inv_no, date_val, cus_slot)
             current_cus_for_inv[inv_no] = gkey          # open / continue block
         else:
-            gkey = current_cus_for_inv.get(inv_no, f"{inv_no}||__nodetail__")
+            # Fee/TOTAL rows normally have no Cus no.-. Keep them in the
+            # closest DETAIL block; if present, prefer the row's own slot.
+            gkey = (
+                (inv_no, date_val, cus_slot)
+                if cus_slot
+                else current_cus_for_inv.get(inv_no, (inv_no, date_val, "__nodetail__"))
+            )
             if "TOTAL" in rt:
                 current_cus_for_inv.pop(inv_no, None)   # close block after TOTAL
 
         ri["gkey"] = gkey
 
     # ── Pass 3: build position lists per group (preserving row order) ────────
-    group_indices: Dict[str, List[int]] = {}
+    group_indices: Dict[Tuple[str, str, str], List[int]] = {}
     for pos, ri in enumerate(row_info):
         if ri["inv"]:
-            group_indices.setdefault(ri.get("gkey", ""), []).append(pos)
+            group_indices.setdefault(ri["gkey"], []).append(pos)
 
     # ── Pass 4: compute desired Vas/HC per row and group totals ───────────
     desired: Dict[int, Tuple] = {}   # row_idx -> (vas, hc)
@@ -1025,12 +1024,7 @@ def apply_delta_inplace(wb, delta: Dict[str, Any], logger: Any = None) -> Dict[s
         workbook_dirty = True
         folder_sheet_rewritten = 1
 
-    # ── Vas / HC / Cus no.-STT (INV sheet only) ────────────────────────────
-    if "INV" in wb.sheetnames:
-        vh_dirty, _ = _sync_vas_hc_inv_inplace(wb["INV"])
-        if vh_dirty:
-            workbook_dirty = True
-
+    # ── Cus no synchronization ──────────────────────────────────────────────
     for sheet_name in TARGET_SHEETS:
         if sheet_name not in wb.sheetnames:
             continue
@@ -1055,6 +1049,12 @@ def apply_delta_inplace(wb, delta: Dict[str, Any], logger: Any = None) -> Dict[s
             continue
         stt_dirty, _ = _sync_cus_no_stt_inplace(wb[sheet_name])
         if stt_dirty:
+            workbook_dirty = True
+
+    # Vas / HC depends on the final Cus no.- block assignment.
+    if "INV" in wb.sheetnames:
+        vh_dirty, _ = _sync_vas_hc_inv_inplace(wb["INV"])
+        if vh_dirty:
             workbook_dirty = True
 
     result = {
