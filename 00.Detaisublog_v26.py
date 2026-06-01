@@ -7036,9 +7036,6 @@ def _u85_append_bench_log_rows(output_path: str, bench_rows: List[List[Any]]):
         wb.close()
 
 def _u85_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):
-    # Legacy local alias candidate: assigned but not read inside _u85_processor_run.
-    # Keep until regression-tested before removal.
-    _u84_processor_run_base = _u84_processor_run
     _u85_reset_bench()
     t_all_0 = time.perf_counter()
     try:
