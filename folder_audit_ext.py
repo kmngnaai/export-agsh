@@ -14,6 +14,9 @@ TOKHAI_PREFIX = "TOKHAIHQ7X_QDTQ_"
 CUS_NO_HEADER = "Cus no"
 CUS_NO_FIRST_HEADER = "Cus no.1"
 CUS_NO_SLOT_HEADER = "Cus no.-"
+CUS_NO_STT_HEADER  = "Cus no.-STT"
+VAS_HEADER         = "Vas"
+HC_HEADER          = "HC"
 FOLDER_SHEET_NAME = "Folder"
 TARGET_SHEETS = ("SUB_DETAIL", "INV", "PL")
 
@@ -703,6 +706,309 @@ def _sync_cus_no_sheet_inplace(ws, affected_folders: Set[str], folder_state: Dic
     return dirty, updated
 
 
+
+def _parse_amount(v: Any) -> float:
+    """Parse cell value to float, handling comma-formatted numbers."""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    text = re.sub(r"[,\s]", "", _nz(v))
+    try:
+        return float(text)
+    except Exception:
+        return 0.0
+
+
+def _sync_vas_hc_inv_inplace(ws) -> Tuple[bool, int]:
+    """
+    Compute Vas, HC and Cus no.-STT columns on the INV sheet.
+
+    COLUMN PLACEMENT
+    ────────────────
+    Vas and HC  : inserted immediately before "Cus no"
+    Cus no.-STT : inserted immediately after "Cus no.-"
+
+    GROUP KEY (per row)
+    ───────────────────
+    DETAIL rows  : Invoice No + Date + Cus no.1   (all 3 cols present)
+    All others   : inherit from most-recent DETAIL of same Invoice No
+
+    PER-ROW VAS / HC
+    ────────────────
+    DETAIL          Vas = LABEL AMOUNT of this row
+                    HC  = sum of HANDLING CHARGE rows in the "trailing block"
+                          (rows after this DETAIL up to next DETAIL/TOTAL,
+                           may contain UPCHARGE/HANDLING CHARGE in any order)
+    UPCHARGE        Vas = that row's TOTAL AMOUNT,  HC = blank
+    DEDUCT          Vas = that row's TOTAL AMOUNT,  HC = blank
+    HANDLING CHARGE Vas = blank,  HC = blank  (value lifted to its DETAIL)
+    TOTAL           Vas = group Vas total,  HC = group HC total
+
+    CUS NO.-STT
+    ───────────
+    Take suffix "-N" from S. Invoice# and append to Cus no.-
+    e.g. S.Invoice# = INV000000479890-3  →  Cus no.-STT = <Cus no.->-3
+    Blank if S. Invoice# absent or has no "-N" suffix.
+
+    VALIDATION (Status of TOTAL row)
+    ─────────────────────────────────
+    col N (AMOUNT W/OUT LABEL) of TOTAL row + Vas_total + HC_total == TOTAL AMOUNT (col Q)
+    OK or ERROR (diff=...)
+    """
+    hdr = _header_map(ws)
+
+    row_type_col     = hdr.get("Row Type", 0)
+    inv_col          = hdr.get("Invoice No", 0)
+    label_amount_col = hdr.get("LABEL AMOUNT", 0)
+    total_amount_col = hdr.get("TOTAL AMOUNT", 0)
+    if total_amount_col <= 0:
+        total_amount_col = hdr.get("TOTAL W HANDLING UPCHARGE", 0)
+    amount_col       = hdr.get("AMOUNT W/OUT LABEL", 0)
+    status_col       = hdr.get("Status", 0)
+    s_inv_col        = hdr.get("S. Invoice#", 0)
+    date_col         = hdr.get("Date", 0)
+    cus_no1_col      = hdr.get(CUS_NO_FIRST_HEADER, 0)
+    cus_slot_col     = hdr.get(CUS_NO_SLOT_HEADER, 0)
+
+    if min(row_type_col, inv_col) <= 0:
+        return False, 0
+
+    # ── ensure Vas / HC columns exist immediately before "Cus no" ─────────
+    def _ensure_before(ws_inner: Any, target_hdr: str, new_hdr: str) -> Tuple[int, bool]:
+        h = _header_map(ws_inner)
+        if new_hdr in h:
+            return h[new_hdr], False
+        target_col = h.get(target_hdr, 0)
+        if target_col <= 0:
+            return _ensure_header_at_end(ws_inner, new_hdr)
+        ws_inner.insert_cols(target_col, 1)
+        ws_inner.cell(1, target_col).value = new_hdr
+        return target_col, True
+
+    _, hc_added  = _ensure_before(ws, CUS_NO_HEADER, HC_HEADER)
+    _, vas_added = _ensure_before(ws, HC_HEADER,     VAS_HEADER)
+
+    # refresh header map after Vas/HC insertions
+    hdr              = _header_map(ws)
+    row_type_col     = hdr.get("Row Type",          row_type_col)
+    inv_col          = hdr.get("Invoice No",         inv_col)
+    label_amount_col = hdr.get("LABEL AMOUNT",       label_amount_col)
+    total_amount_col = hdr.get("TOTAL AMOUNT",       total_amount_col)
+    if total_amount_col <= 0:
+        total_amount_col = hdr.get("TOTAL W HANDLING UPCHARGE", 0)
+    amount_col       = hdr.get("AMOUNT W/OUT LABEL", amount_col)
+    status_col       = hdr.get("Status",             status_col)
+    s_inv_col        = hdr.get("S. Invoice#",        s_inv_col)
+    date_col         = hdr.get("Date",               date_col)
+    cus_no1_col      = hdr.get(CUS_NO_FIRST_HEADER,  cus_no1_col)
+    cus_slot_col     = hdr.get(CUS_NO_SLOT_HEADER,   cus_slot_col)
+    vas_col          = hdr.get(VAS_HEADER,            0)
+    hc_col           = hdr.get(HC_HEADER,             0)
+
+    dirty   = hc_added or vas_added
+    updated = 0
+    max_row = ws.max_row or 0
+
+    # ── Pass 1: read row metadata ──────────────────────────────────────────
+    row_info: List[Dict[str, Any]] = []
+    for r in range(2, max_row + 1):
+        rt     = _uc(ws.cell(r, row_type_col).value).strip()
+        inv_no = _nz(ws.cell(r, inv_col).value).strip()
+        if not inv_no and not rt:
+            continue
+        row_info.append({"r": r, "inv": inv_no, "rt": rt})
+
+    # ── Pass 2: pre-normalize effective_cus then build group keys ────────────
+    #
+    # DETAIL row  : set current_cus = Cus no.1 of this row; gkey uses it
+    # HANDLING / UPCHARGE / DEDUCT: inherit current_cus (same block)
+    # TOTAL row   : inherit current_cus THEN reset → closes this block
+    #
+    # This prevents Vas/HC totals bleeding across blocks of the same invoice.
+    current_cus_for_inv: Dict[str, str] = {}   # inv_no -> active gkey
+
+    for ri in row_info:
+        inv_no = ri["inv"]
+        if not inv_no:
+            continue
+        r  = ri["r"]
+        rt = ri["rt"]
+
+        if rt == "DETAIL":
+            date_val   = _nz(ws.cell(r, date_col).value)    if date_col    > 0 else ""
+            cusno1_val = _nz(ws.cell(r, cus_no1_col).value) if cus_no1_col > 0 else ""
+            gkey = f"{inv_no}||{date_val}|||{cusno1_val}"
+            current_cus_for_inv[inv_no] = gkey          # open / continue block
+        else:
+            gkey = current_cus_for_inv.get(inv_no, f"{inv_no}||__nodetail__")
+            if "TOTAL" in rt:
+                current_cus_for_inv.pop(inv_no, None)   # close block after TOTAL
+
+        ri["gkey"] = gkey
+
+    # ── Pass 3: build position lists per group (preserving row order) ────────
+    group_indices: Dict[str, List[int]] = {}
+    for pos, ri in enumerate(row_info):
+        if ri["inv"]:
+            group_indices.setdefault(ri.get("gkey", ""), []).append(pos)
+
+    # ── Pass 4: compute desired Vas/HC per row and group totals ───────────
+    desired: Dict[int, Tuple] = {}   # row_idx -> (vas, hc)
+
+    for gkey, positions in group_indices.items():
+        vas_total           = 0.0
+        hc_total            = 0.0
+        detail_amount_total = 0.0   # from TOTAL row col N
+        file_total          = 0.0
+        total_row_idx       = 0
+
+        # invoice-level totals
+        for pos in positions:
+            ri = row_info[pos]
+            r  = ri["r"]
+            rt = ri["rt"]
+            if rt == "DETAIL":
+                lbl = _parse_amount(ws.cell(r, label_amount_col).value) if label_amount_col > 0 else 0.0
+                vas_total += lbl
+            elif rt in ("UPCHARGE", "DEDUCT"):
+                amt = _parse_amount(ws.cell(r, total_amount_col).value) if total_amount_col > 0 else 0.0
+                vas_total += amt
+            elif rt == "HANDLING CHARGE":
+                amt = _parse_amount(ws.cell(r, total_amount_col).value) if total_amount_col > 0 else 0.0
+                hc_total += amt
+            elif "TOTAL" in rt:
+                # Use TOTAL row's own col N as the authoritative base amount
+                detail_amount_total = _parse_amount(ws.cell(r, amount_col).value)       if amount_col       > 0 else 0.0
+                file_total          = _parse_amount(ws.cell(r, total_amount_col).value) if total_amount_col > 0 else 0.0
+                total_row_idx       = r
+
+        # per-row Vas / HC using trailing-block look-ahead for DETAIL
+        n = len(positions)
+        for i, pos in enumerate(positions):
+            ri = row_info[pos]
+            r  = ri["r"]
+            rt = ri["rt"]
+
+            if rt == "DETAIL":
+                lbl   = _parse_amount(ws.cell(r, label_amount_col).value) if label_amount_col > 0 else 0.0
+                d_vas = round(lbl, 2) if lbl != 0.0 else None
+                # trailing block: scan forward until next DETAIL or TOTAL
+                trailing_hc = 0.0
+                for j in range(i + 1, n):
+                    next_rt = row_info[positions[j]]["rt"]
+                    if next_rt == "DETAIL" or "TOTAL" in next_rt:
+                        break
+                    if next_rt == "HANDLING CHARGE":
+                        nr = row_info[positions[j]]["r"]
+                        trailing_hc += _parse_amount(ws.cell(nr, total_amount_col).value) if total_amount_col > 0 else 0.0
+                d_hc = round(trailing_hc, 2) if trailing_hc != 0.0 else None
+                desired[r] = (d_vas, d_hc)
+
+            elif rt in ("UPCHARGE", "DEDUCT"):
+                amt = _parse_amount(ws.cell(r, total_amount_col).value) if total_amount_col > 0 else 0.0
+                desired[r] = (round(amt, 2) if amt != 0.0 else None, None)
+
+            elif rt == "HANDLING CHARGE":
+                desired[r] = (None, None)
+
+            elif "TOTAL" in rt:
+                d_vas_t = round(vas_total, 2) if vas_total != 0.0 else None
+                d_hc_t  = round(hc_total,  2) if hc_total  != 0.0 else None
+                desired[r] = (d_vas_t, d_hc_t)
+
+            else:
+                desired[r] = (None, None)
+
+        # validation on TOTAL row
+        if total_row_idx > 0 and status_col > 0:
+            computed = round(detail_amount_total + vas_total + hc_total, 2)
+            diff     = round(computed - round(file_total, 2), 2)
+            is_valid = abs(diff) < 0.02
+            new_st   = "OK" if is_valid else f"ERROR (diff={diff})"
+            old_st   = _nz(ws.cell(total_row_idx, status_col).value)
+            if old_st != new_st:
+                ws.cell(total_row_idx, status_col).value = new_st
+                dirty   = True
+                updated += 1
+
+    # ── Pass 5: write Vas / HC ────────────────────────────────────────────
+    for r, (d_vas, d_hc) in desired.items():
+        if vas_col > 0:
+            old_v = ws.cell(r, vas_col).value
+            if old_v != d_vas:
+                ws.cell(r, vas_col).value = d_vas
+                dirty   = True
+                updated += 1
+        if hc_col > 0:
+            old_h = ws.cell(r, hc_col).value
+            if old_h != d_hc:
+                ws.cell(r, hc_col).value = d_hc
+                dirty   = True
+                updated += 1
+
+    return dirty, updated
+
+
+def _sync_cus_no_stt_inplace(ws) -> Tuple[bool, int]:
+    """
+    Compute and write Cus no.-STT column on the INV sheet.
+
+    Must be called AFTER _sync_cus_no_sheet_inplace and
+    _sync_s_invoice_by_cus_no_inplace so that both "Cus no.-" and
+    "S. Invoice#" already contain their final values.
+
+    COLUMN PLACEMENT: immediately after "Cus no.-"
+
+    LOGIC (per row):
+      - Extract suffix "-N" from S. Invoice#  (e.g. "INV000000479890-3" -> "-3")
+      - Cus no.-STT = Cus no.- + suffix
+      - Blank when S. Invoice# is empty or has no "-N" suffix
+    """
+    hdr = _header_map(ws)
+
+    # Ensure column exists immediately after "Cus no.-"
+    cus_slot_col = hdr.get(CUS_NO_SLOT_HEADER, 0)
+    if CUS_NO_STT_HEADER not in hdr:
+        if cus_slot_col > 0:
+            insert_at = cus_slot_col + 1
+            ws.insert_cols(insert_at, 1)
+            ws.cell(1, insert_at).value = CUS_NO_STT_HEADER
+        else:
+            # Cus no.- not found — append at end
+            _ensure_header_at_end(ws, CUS_NO_STT_HEADER)
+        hdr = _header_map(ws)   # refresh after insertion
+
+    stt_col      = hdr.get(CUS_NO_STT_HEADER, 0)
+    s_inv_col    = hdr.get("S. Invoice#", 0)
+    cus_slot_col = hdr.get(CUS_NO_SLOT_HEADER, cus_slot_col)
+
+    if stt_col <= 0:
+        return False, 0
+
+    dirty   = False
+    updated = 0
+    max_row = ws.max_row or 0
+
+    for r in range(2, max_row + 1):
+        s_inv_val = _nz(ws.cell(r, s_inv_col).value)   if s_inv_col  > 0 else ""
+        cus_slot  = _nz(ws.cell(r, cus_slot_col).value) if cus_slot_col > 0 else ""
+
+        m = re.search(r"(-\d+)$", s_inv_val)
+        if m and cus_slot:
+            desired_stt: Any = cus_slot + m.group(1)
+        else:
+            desired_stt = None
+
+        old_stt = ws.cell(r, stt_col).value
+        if old_stt != desired_stt:
+            ws.cell(r, stt_col).value = desired_stt
+            dirty   = True
+            updated += 1
+
+    return dirty, updated
+
+
 def apply_delta_inplace(wb, delta: Dict[str, Any], logger: Any = None) -> Dict[str, Any]:
     desired_folder_rows: List[List[Any]] = list(delta.get("desired_folder_rows", []) or [])
     affected_folders: Set[str] = set(delta.get("affected_folders", []) or [])
@@ -718,6 +1024,12 @@ def apply_delta_inplace(wb, delta: Dict[str, Any], logger: Any = None) -> Dict[s
     if _sync_folder_sheet_inplace(ws_folder, desired_folder_rows):
         workbook_dirty = True
         folder_sheet_rewritten = 1
+
+    # ── Vas / HC / Cus no.-STT (INV sheet only) ────────────────────────────
+    if "INV" in wb.sheetnames:
+        vh_dirty, _ = _sync_vas_hc_inv_inplace(wb["INV"])
+        if vh_dirty:
+            workbook_dirty = True
 
     for sheet_name in TARGET_SHEETS:
         if sheet_name not in wb.sheetnames:
@@ -735,6 +1047,14 @@ def apply_delta_inplace(wb, delta: Dict[str, Any], logger: Any = None) -> Dict[s
         dirty, updated = _sync_s_invoice_by_cus_no_inplace(wb[sheet_name])
         sequence_updates[sheet_name] = updated
         if dirty:
+            workbook_dirty = True
+
+    # ── Cus no.-STT: must run AFTER Cus no.- and S. Invoice# are finalised ──
+    for sheet_name in ("INV",):
+        if sheet_name not in wb.sheetnames:
+            continue
+        stt_dirty, _ = _sync_cus_no_stt_inplace(wb[sheet_name])
+        if stt_dirty:
             workbook_dirty = True
 
     result = {
