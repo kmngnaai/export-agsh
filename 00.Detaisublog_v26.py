@@ -7523,9 +7523,6 @@ def _v72_build_detail_bundle(file_path: str):
 
 
 # Force late references to use cache-enabled builder
-# Legacy self-assignment candidate: this assignment is a no-op.
-# Keep the cache-enabled function definition above until regression-tested.
-_v72_build_detail_bundle = _v72_build_detail_bundle
 
 
 _u88_processor_run_base = _u87_processor_run
