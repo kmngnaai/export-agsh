@@ -7073,6 +7073,8 @@ def _u85_processor_run(self, folder_path: str, output_path: str, progress_callba
 # =========================
 _u86_processor_run_base = _u85_processor_run
 
+# Legacy wrapper candidate: adds BENCH_ENTER_U86 marker and delegates to U85.
+# Keep until regression-tested and indirect callers are ruled out.
 def _u86_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):
     self.logger.log('BENCH_ENTER_U86', 'info')
     return _u86_processor_run_base(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)
