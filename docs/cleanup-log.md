@@ -21,6 +21,8 @@ Làm cho backend dễ đọc và dễ bảo trì hơn bằng các thay đổi nh
 6. Đánh dấu `_u96_processor_run` là legacy wrapper candidate.
 7. Đánh dấu `_u84_processor_run_base` trong `_u85_processor_run` là local alias candidate.
 8. Xóa unused local alias `_u84_processor_run_base`.
+9. Xóa self-assignment V72 U88 sau comment `# Force late references to use cache-enabled builder`.
+10. Xóa self-assignment V72 U90 sau comment `# Force late references`.
 
 ## 4. Thay đổi đã xóa thật
 
@@ -48,11 +50,38 @@ tools\run-regression.ps1
 
 Kết quả: PASS.
 
+### Self-assignment V72 U88
+
+Block đã xóa gồm đúng 3 dòng:
+
+```python
+# Legacy self-assignment candidate: this assignment is a no-op.
+# Keep the cache-enabled function definition above until regression-tested.
+_v72_build_detail_bundle = _v72_build_detail_bundle
+```
+
+Vị trí: ngay sau comment `# Force late references to use cache-enabled builder`.
+
+Kết quả regression runner: PASS.
+
+### Self-assignment V72 U90
+
+Block đã xóa gồm đúng 3 dòng:
+
+```python
+# Legacy self-assignment candidate: this assignment is a no-op.
+# Keep the cache-enabled function definition above until regression-tested.
+_v72_build_detail_bundle = _v72_build_detail_bundle
+```
+
+Vị trí: ngay sau comment `# Force late references`.
+
+Kết quả regression runner: PASS.
+
 ## 5. Các vùng chưa được xóa
 
 Các vùng sau mới chỉ được đánh dấu candidate, chưa được xóa:
 
-- Hai dòng self-assignment `_v72_build_detail_bundle = _v72_build_detail_bundle`.
 - Wrapper `_u86_processor_run`.
 - Wrapper `_u95_processor_run`.
 - Wrapper `_u96_processor_run`.
@@ -65,5 +94,7 @@ Các vùng sau mới chỉ được đánh dấu candidate, chưa được xóa:
 - Chưa đụng vào cache, substate hoặc detail index.
 - Chưa đụng vào repair file nguồn.
 - Chưa đụng vào tích hợp `folder_audit_ext.py`.
+- Chưa xóa function cache V72.
+- Chưa đụng vào override cuối `_v72_build_detail_bundle = _u108_build_detail_bundle_safe`.
 
 Tài liệu này ghi lại tiến trình cleanup từng bước. Không dùng danh sách candidate làm bằng chứng để xóa code nếu chưa phân tích lại và chạy regression runner.
