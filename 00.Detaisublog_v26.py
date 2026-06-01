@@ -8907,6 +8907,8 @@ def _u96_rebuild_merged_detail_rows_block_surgery(output_path: str, ok_paths: se
 _u87_rebuild_merged_detail_rows_smart = _u96_rebuild_merged_detail_rows_block_surgery
 
 
+# Legacy wrapper candidate: delegates to U94 after the nearby U96 block-surgery monkey-patch.
+# Keep until regression-tested and indirect callers are ruled out.
 def _u96_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):
     return _u94_processor_run(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)
 
