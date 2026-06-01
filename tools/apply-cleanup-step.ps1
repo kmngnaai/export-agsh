@@ -98,34 +98,43 @@ if ($GitStatus) {
 }
 
 $Text = [System.IO.File]::ReadAllText($BackendPath, $Utf8NoBom)
-$NewLine = "`n"
-if ($Text.Contains("`r`n")) {
-    $NewLine = "`r`n"
-}
 
 switch ($Step) {
     "remove-v72-self-assignment-u88" {
-        $TargetBlock = [string]::Join($NewLine, @(
+        $TargetLines = @(
             "# Force late references to use cache-enabled builder",
             "# Legacy self-assignment candidate: this assignment is a no-op.",
             "# Keep the cache-enabled function definition above until regression-tested.",
             "_v72_build_detail_bundle = _v72_build_detail_bundle"
-        ))
+        )
         $Replacement = "# Force late references to use cache-enabled builder"
     }
     "remove-v72-self-assignment-u90" {
-        $TargetBlock = [string]::Join($NewLine, @(
+        $TargetLines = @(
             "# Force late references",
             "# Legacy self-assignment candidate: this assignment is a no-op.",
             "# Keep the cache-enabled function definition above until regression-tested.",
             "_v72_build_detail_bundle = _v72_build_detail_bundle"
-        ))
+        )
         $Replacement = "# Force late references"
     }
 }
 
-# Dùng anchor cụ thể để chỉ xóa block mục tiêu, không chạm function hoặc override U108.
-$MatchCount = Count-LiteralOccurrences -Text $Text -Needle $TargetBlock
+# Thử riêng literal LF và CRLF để xử lý an toàn cả file có newline trộn lẫn.
+$TargetBlocks = @(
+    [string]::Join("`n", $TargetLines),
+    [string]::Join("`r`n", $TargetLines)
+)
+$TargetBlock = $null
+$MatchCount = 0
+
+foreach ($CandidateBlock in $TargetBlocks) {
+    $CandidateCount = Count-LiteralOccurrences -Text $Text -Needle $CandidateBlock
+    if ($CandidateCount -gt 0) {
+        $TargetBlock = $CandidateBlock
+        $MatchCount += $CandidateCount
+    }
+}
 
 if ($MatchCount -eq 0) {
     Fail "Không tìm thấy block cleanup chính xác cho Step '$Step'."
