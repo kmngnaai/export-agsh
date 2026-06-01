@@ -8160,8 +8160,6 @@ def _u94_processor_run(self, folder_path: str, output_path: str, progress_callba
 # - Neu co common-prefix lon -> chi rewrite tail
 # =========================================================
 
-import hashlib
-
 _U95_BLOCK_INDEX_VERSION = 1
 _U95_BLOCK_INDEX_SHEET = "_U95_BLOCK_INDEX"
 
@@ -11178,12 +11176,6 @@ class Processor(Processor):
 # - Cac helper legacy van duoc giu lai vi business parsing con phu thuoc
 # - Runtime se di qua class Processor ben duoi
 # =========================================================
-
-import logging
-import traceback
-from dataclasses import dataclass
-from typing import Optional, Set, Dict, Any
-
 
 _RUNTIME_LOGGER = logging.getLogger("detaisublog.runtime")
 if not _RUNTIME_LOGGER.handlers:
