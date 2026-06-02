@@ -115,7 +115,8 @@ function New-LiteralBlocksWithFlexibleNewlines {
 $AllowedSteps = @(
     "remove-v72-self-assignment-u88",
     "remove-v72-self-assignment-u90",
-    "remove-u86-wrapper"
+    "remove-u86-wrapper",
+    "remove-u95-wrapper"
 )
 
 if ($AllowedSteps -notcontains $Step) {
@@ -164,6 +165,15 @@ switch ($Step) {
             "def _u86_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):",
             "    self.logger.log('BENCH_ENTER_U86', 'info')",
             "    return _u86_processor_run_base(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)"
+        )
+        $Replacement = ""
+    }
+    "remove-u95-wrapper" {
+        $TargetLines = @(
+            "# Legacy wrapper candidate: delegates to U94 after the nearby U95 rebuild monkey-patch.",
+            "# Keep until regression-tested and indirect callers are ruled out.",
+            "def _u95_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):",
+            "    return _u94_processor_run(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)"
         )
         $Replacement = ""
     }
