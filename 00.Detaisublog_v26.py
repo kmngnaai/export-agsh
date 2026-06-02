@@ -8523,10 +8523,7 @@ def _u95_rebuild_merged_detail_rows_incremental(output_path: str, ok_paths: set,
 _u87_rebuild_merged_detail_rows_smart = _u95_rebuild_merged_detail_rows_incremental
 
 
-# Legacy wrapper candidate: delegates to U94 after the nearby U95 rebuild monkey-patch.
-# Keep until regression-tested and indirect callers are ruled out.
-def _u95_processor_run(self, folder_path: str, output_path: str, progress_callback=None, repair_options: Optional[RepairOptions] = None):
-    return _u94_processor_run(self, folder_path, output_path, progress_callback=progress_callback, repair_options=repair_options)
+
 
 
 
